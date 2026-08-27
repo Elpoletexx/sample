@@ -1,5 +1,53 @@
-# ZPSTUDIOS
-GO https://github.com/Elpoletexx/sample.git TO SEE CODE
+# ZPSTUDIOS FRAMEWORK CODE SNIPPET
+--!strict
+
+local Runtime = {}
+local clientKernel = nil
+local serverKernel = nil
+
+function Runtime.SetClientKernel(kernel: any)
+    assert(clientKernel == nil, "Client kernel is already set")
+    clientKernel = kernel
+end
+
+function Runtime.SetServerKernel(kernel: any)
+    assert(serverKernel == nil, "Server kernel is already set")
+    serverKernel = kernel
+end
+
+function Runtime.GetController(name: string): any
+    assert(clientKernel ~= nil, "ZPFramework client has not started")
+    return clientKernel:GetController(name)
+end
+
+function Runtime.GetService(name: string): any
+    assert(serverKernel ~= nil, "ZPFramework server has not started")
+    return serverKernel:GetService(name)
+end
+
+function Runtime.AwaitController(name: string, timeout: number?): any?
+    local deadline = os.clock() + (timeout or 15)
+    while clientKernel == nil and os.clock() < deadline do
+        task.wait()
+    end
+    if clientKernel == nil then
+        return nil
+    end
+    return clientKernel:GetController(name)
+end
+
+function Runtime.AwaitService(name: string, timeout: number?): any?
+    local deadline = os.clock() + (timeout or 15)
+    while serverKernel == nil and os.clock() < deadline do
+        task.wait()
+    end
+    if serverKernel == nil then
+        return nil
+    end
+    return serverKernel:GetService(name)
+end
+
+return table.freeze(Runtime)
 ### Roblox Development • Luau • Game Systems • Technical Architecture
 
 Welcome to the official technical portfolio of **ZPSTUDIOS**.
