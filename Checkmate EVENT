@@ -1,0 +1,1073 @@
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local RENDER_KEY = "FlagFallCamera"
+
+local SOUND = {
+	Ping    = "rbxasset://sounds/electronicpingshort.wav",
+	Step    = "rbxasset://sounds/clickfast.wav",
+	Press   = "rbxasset://sounds/button.wav",
+	Stomp   = "rbxasset://sounds/metal.ogg",
+	Impact  = "rbxasset://sounds/hit.wav",
+	Knock   = "rbxasset://sounds/collide.wav",
+	Snap    = "rbxasset://sounds/snap.mp3",
+	Boom    = "rbxasset://sounds/bass.mp3",
+	Victory = "rbxasset://sounds/victory.wav",
+	Snore   = "rbxasset://sounds/uuhhh.mp3",
+	Wind    = "rbxasset://sounds/action_falling.mp3",
+}
+
+local ACCENT = Color3.fromRGB(228, 194, 120)
+local INK    = Color3.fromRGB(246, 244, 239)
+local MUTED  = Color3.fromRGB(176, 171, 162)
+local CARD   = Color3.fromRGB(13, 12, 11)
+
+local WHITE_TIME = 47
+local BLACK_TIME = 598
+
+local SHOT = {
+	open     = { Vector3.new(67.6, 4.10, 3.60),  Vector3.new(63.5, 3.25, -2.60), 0.01 },
+	mate     = { Vector3.new(66.4, 3.72, 1.60),  Vector3.new(63.5, 3.20, -0.70), 2.60 },
+	walk     = { Vector3.new(69.4, 5.50, 2.30),  Vector3.new(64.9, 3.40, -1.60), 1.00 },
+	reveal   = { Vector3.new(60.0, 6.80, 8.50),  Vector3.new(60.0, 4.00, -13.5), 2.40 },
+	climb    = { Vector3.new(70.6, 6.10, -0.60), Vector3.new(65.9, 4.60, -3.40), 1.30 },
+	press    = { Vector3.new(68.4, 5.85, -1.50), Vector3.new(65.9, 4.95, -3.10), 0.80 },
+	sleep    = { Vector3.new(65.3, 6.30, -11.2), Vector3.new(60.3, 4.70, -17.6), 1.40 },
+	stomp    = { Vector3.new(69.2, 6.30, -2.30), Vector3.new(65.9, 4.60, -3.80), 0.70 },
+	flag     = { Vector3.new(67.8, 5.15, -5.35), Vector3.new(66.4, 4.68, -5.05), 0.45 },
+	collapse = { Vector3.new(57.4, 5.10, -3.30), Vector3.new(62.5, 3.30, -7.30), 0.80 },
+	crown    = { Vector3.new(66.9, 4.90, 1.50),  Vector3.new(63.5, 3.30, -1.20), 1.20 },
+	final    = { Vector3.new(60.0, 9.20, 9.00),  Vector3.new(60.0, 3.00, -4.20), 2.20 },
+}
+
+local event = workspace:WaitForChild("CheckmateEvent")
+local board = event:WaitForChild("Board")
+local whiteFolder = event:WaitForChild("White")
+local blackFolder = event:WaitForChild("Black")
+local scene = workspace:WaitForChild("CheckmateBreak")
+local clock = scene:WaitForChild("ChessClock")
+local props = scene:WaitForChild("Props")
+local lamp = scene:WaitForChild("Lamp")
+local chairBlack = scene:WaitForChild("ChairBlack")
+
+local whiteKing = whiteFolder:WaitForChild("King")
+local blackKing = blackFolder:WaitForChild("King")
+local blackQueen = blackFolder:WaitForChild("Queen")
+local clockBody = clock:WaitForChild("Body")
+local clockFlag = clock:WaitForChild("Flag")
+local buttonWhite = clock:WaitForChild("ButtonWhite")
+local buttonBlack = clock:WaitForChild("ButtonBlack")
+local dialWhite = clockBody.Face.DialWhite.Time
+local dialBlack = clockBody.Face.DialBlack.Time
+local mug = props:WaitForChild("Mug")
+local raggy = scene:FindFirstChild("Raggy")
+
+local BOARD_TOP = board.Position.Y + board.Size.Y / 2
+local TABLE_TOP = scene.Table.Top.Position.Y + scene.Table.Top.Size.Y / 2
+local CLOCK_TOP = clockBody.Position.Y + clockBody.Size.Y / 2
+local FLOOR_TOP = scene.Room.Floor.Position.Y + scene.Room.Floor.Size.Y / 2
+local KING_HALF = whiteKing.Size.X / 2 -- las piezas del kit tienen el eje largo en X local
+
+local IDLE, RUNNING = "IDLE", "RUNNING"
+local state = IDLE
+
+local snapshot = {}   -- [BasePart] = CFrame original
+local baseRot = {}    -- [BasePart] = rotacion original, sin posicion
+local scratch = {}    -- instancias temporales de la secuencia
+local lampPivot0 = lamp.WorldPivot
+local raggyPivot0 = raggy and raggy:GetPivot() or nil
+
+local timeWhite, timeBlack = WHITE_TIME, BLACK_TIME
+local blackTarget, sideRunning, lastPainted = nil, nil, nil
+local clockConn, lampConn, breathConn = nil, nil, nil
+local lampVelocity = 0
+
+local active = false
+local shakeAmount, timelapseSpeed = 0, 0
+local camGoal = Instance.new("CFrameValue")
+local colourEffect, savedWorld = nil, nil
+
+local function track(inst)
+	table.insert(scratch, inst)
+	return inst
+end
+
+local function playSound(id, parent, volume, speed)
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = volume or 1
+	s.PlaybackSpeed = speed or 1
+	s.RollOffMaxDistance = 250
+	s.Parent = parent or board
+	s:Play()
+	Debris:AddItem(s, 14)
+	return s
+end
+
+local function animate(duration, fn)
+	local t0 = os.clock()
+	local a = 0
+	while a < 1 do
+		a = math.clamp((os.clock() - t0) / duration, 0, 1)
+		fn(a)
+		RunService.Heartbeat:Wait()
+	end
+end
+
+local function tilted(cf, halfHeight, axis, angle)
+	local pivot = cf.Position - Vector3.yAxis * halfHeight
+	return CFrame.new(pivot) * CFrame.fromAxisAngle(axis, angle) * CFrame.new(-pivot) * cf
+end
+
+local function squareXZ(name)
+	local attachment = board:FindFirstChild(name)
+	if not attachment then return 0, 0 end
+	return attachment.WorldPosition.X, attachment.WorldPosition.Z
+end
+
+local function hop(piece, target, duration, height)
+	local rot = baseRot[piece]
+	local half = piece.Size.X / 2
+	local from = piece.Position
+	local flat = (target - from) * Vector3.new(1, 0, 1)
+	local axis = flat.Magnitude > 0.05 and Vector3.yAxis:Cross(flat.Unit) or Vector3.xAxis
+	animate(duration, function(a)
+		local pos = from:Lerp(target, a) + Vector3.yAxis * (math.sin(a * math.pi) * height)
+		piece.CFrame = tilted(CFrame.new(pos) * rot, half, axis, math.sin(a * math.pi * 2) * math.rad(16))
+	end)
+	piece.CFrame = CFrame.new(target) * rot
+end
+
+local function walk(piece, points, stepDuration, height)
+	for _, target in ipairs(points) do
+		hop(piece, target, stepDuration, height)
+		playSound(SOUND.Step, piece, 0.5, 1.5)
+	end
+end
+
+local function topple(piece, direction, duration)
+	local base = piece.CFrame
+	local half = piece.Size.X / 2
+	local flat = direction * Vector3.new(1, 0, 1)
+	if flat.Magnitude < 0.01 then flat = Vector3.xAxis end
+	local axis = Vector3.yAxis:Cross(flat.Unit)
+	animate(duration, function(a)
+		local eased = math.min(1, a * a * 1.06) - 0.06 * math.sin(a * math.pi) * (1 - a)
+		piece.CFrame = tilted(base, half, axis, math.rad(92) * eased)
+	end)
+end
+
+local function fling(piece, target, duration, spinAxis)
+	local from = piece.Position
+	local rot = piece.CFrame - from
+	local peak = math.max(from.Y, target.Y) + 2.2
+	animate(duration, function(a)
+		local inv = 1 - a
+		local y = inv * inv * from.Y + 2 * inv * a * peak + a * a * target.Y
+		local pos = Vector3.new(from.X + (target.X - from.X) * a, y, from.Z + (target.Z - from.Z) * a)
+		piece.CFrame = CFrame.new(pos) * CFrame.fromAxisAngle(spinAxis, a * math.pi * 3) * rot
+	end)
+end
+
+local function tipModel(model, pivotPoint, axis, angle, duration)
+	local base = model:GetPivot()
+	animate(duration, function(a)
+		local eased = 1 - (1 - a) ^ 3
+		model:PivotTo(CFrame.new(pivotPoint) * CFrame.fromAxisAngle(axis, angle * eased) * CFrame.new(-pivotPoint) * base)
+	end)
+end
+local function puff(position, radius, count)
+	for _ = 1, count do
+		local p = Instance.new("Part")
+		p.Shape = Enum.PartType.Ball
+		p.Size = Vector3.one * (radius * 0.5)
+		p.Position = position + Vector3.new((math.random() - 0.5) * radius, math.random() * radius * 0.4, (math.random() - 0.5) * radius)
+		p.Anchored, p.CanCollide, p.CanQuery, p.CastShadow = true, false, false, false
+		p.Material = Enum.Material.SmoothPlastic
+		p.Color = Color3.fromRGB(216, 207, 188)
+		p.Transparency = 0.55
+		p.Parent = scene
+		track(p)
+		local drift = Vector3.new((math.random() - 0.5) * 2, 0.9 + math.random(), (math.random() - 0.5) * 2)
+		TweenService:Create(p, TweenInfo.new(1.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = Vector3.one * radius * 1.8, Transparency = 1, CFrame = p.CFrame + drift,
+		}):Play()
+		Debris:AddItem(p, 1.4)
+	end
+end
+
+local function shockwave(position, diameter, duration)
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Size = Vector3.new(0.1, 1, 1)
+	ring.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Anchored, ring.CanCollide, ring.CanQuery, ring.CastShadow = true, false, false, false
+	ring.Material = Enum.Material.Neon
+	ring.Color = Color3.fromRGB(255, 236, 190)
+	ring.Transparency = 0.35
+	ring.Parent = scene
+	track(ring)
+	TweenService:Create(ring, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Size = Vector3.new(0.1, diameter, diameter), Transparency = 1,
+	}):Play()
+	Debris:AddItem(ring, duration + 0.2)
+end
+
+local function confetti(count)
+	local palette = { ACCENT, Color3.fromRGB(255, 255, 255), Color3.fromRGB(214, 176, 96), Color3.fromRGB(190, 190, 196) }
+	for _ = 1, count do
+		local p = Instance.new("Part")
+		p.Size = Vector3.new(0.16, 0.02, 0.28)
+		p.CFrame = CFrame.new(60 + (math.random() - 0.5) * 13, 12 + math.random() * 3, -4 + (math.random() - 0.5) * 13)
+			* CFrame.Angles(math.random() * 6, math.random() * 6, math.random() * 6)
+		p.Anchored, p.CanCollide, p.CanQuery, p.CastShadow = false, false, false, false
+		p.Material = Enum.Material.SmoothPlastic
+		p.Color = palette[math.random(#palette)]
+		p.Parent = scene
+		track(p)
+		p.AssemblyLinearVelocity = Vector3.new((math.random() - 0.5) * 5, -2, (math.random() - 0.5) * 5)
+		p.AssemblyAngularVelocity = Vector3.new(math.random() * 8, math.random() * 8, math.random() * 8)
+		Debris:AddItem(p, 10)
+	end
+end
+
+local function glow(adornee, fill, outline, fillTransparency)
+	local h = Instance.new("Highlight")
+	h.Adornee = adornee
+	h.FillColor = fill
+	h.FillTransparency = fillTransparency or 0.7
+	h.OutlineColor = outline
+	h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	h.Parent = adornee
+	return track(h)
+end
+
+local function checkLine()
+	local from, to = blackQueen.Position, whiteKing.Position
+	local beam = Instance.new("Part")
+	beam.Size = Vector3.new(0.08, 0.08, (to - from).Magnitude)
+	beam.CFrame = CFrame.lookAt(from:Lerp(to, 0.5), to)
+	beam.Anchored, beam.CanCollide, beam.CanQuery, beam.CastShadow = true, false, false, false
+	beam.Material = Enum.Material.Neon
+	beam.Color = Color3.fromRGB(214, 66, 58)
+	beam.Transparency = 0.4
+	beam.Parent = scene
+	track(beam)
+	TweenService:Create(beam, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+		Transparency = 0.85,
+	}):Play()
+end
+
+
+local buttonBase = { [buttonWhite] = buttonWhite.CFrame, [buttonBlack] = buttonBlack.CFrame }
+
+local function formatTime(t)
+	t = math.max(0, t)
+	return string.format("%d:%02d", math.floor(t / 60), math.floor(t % 60))
+end
+
+local function paintClock(force)
+	local key = math.floor(timeWhite) .. "|" .. math.floor(timeBlack)
+	if not force and key == lastPainted then return end
+	lastPainted = key
+	dialWhite.Text = formatTime(timeWhite)
+	dialBlack.Text = formatTime(timeBlack)
+end
+
+
+local function pressSide(side)
+	local down = side == "white" and buttonWhite or buttonBlack
+	local up = side == "white" and buttonBlack or buttonWhite
+	TweenService:Create(down, TweenInfo.new(0.10), { CFrame = CFrame.new(0, -0.14, 0) * buttonBase[down] }):Play()
+	TweenService:Create(up, TweenInfo.new(0.10), { CFrame = buttonBase[up] }):Play()
+end
+
+local function startClock()
+	if clockConn then return end
+	local last = os.clock()
+	clockConn = RunService.Heartbeat:Connect(function()
+		local now = os.clock()
+		local dt = now - last
+		last = now
+		if blackTarget then
+			timeBlack += (blackTarget - timeBlack) * math.min(dt * 6, 1)
+			if math.abs(timeBlack - blackTarget) < 0.4 then timeBlack = blackTarget end
+		elseif sideRunning == "black" then
+			timeBlack = math.max(0, timeBlack - dt)
+		end
+		if sideRunning == "white" then
+			timeWhite = math.max(0, timeWhite - dt)
+		end
+		paintClock()
+	end)
+end
+
+local function stopClock()
+	if clockConn then clockConn:Disconnect(); clockConn = nil end
+end
+
+
+local function startLampSwing()
+	if lampConn then return end
+	local base = lamp:GetPivot()
+	local pivotPoint = lamp.WorldPivot.Position
+	local angle = 0
+	lampVelocity = 0
+	lampConn = RunService.Heartbeat:Connect(function(dt)
+		lampVelocity += (-26 * angle - 1.7 * lampVelocity) * dt
+		angle += lampVelocity * dt
+		lamp:PivotTo(CFrame.new(pivotPoint) * CFrame.Angles(angle * 0.35, 0, angle) * CFrame.new(-pivotPoint) * base)
+	end)
+end
+
+local function stopLampSwing()
+	if lampConn then lampConn:Disconnect(); lampConn = nil end
+end
+
+-- Raggy respira. Es un detalle de dos lineas y es lo que vende que esta
+-- dormido y no simplemente colocado ahi.
+local function startBreathing()
+	if breathConn or not raggy then return end
+	local base = raggy:GetPivot()
+	local t = 0
+	breathConn = RunService.Heartbeat:Connect(function(dt)
+		t += dt
+		local rise = math.sin(t * 1.5) * 0.045
+		raggy:PivotTo(base * CFrame.new(0, rise, 0) * CFrame.Angles(math.sin(t * 1.5) * 0.006, 0, 0))
+	end)
+end
+
+local function stopBreathing()
+	if breathConn then breathConn:Disconnect(); breathConn = nil end
+end
+
+
+local function remember(part)
+	snapshot[part] = part.CFrame
+	baseRot[part] = part.CFrame - part.CFrame.Position
+end
+
+local function takeSnapshot()
+	for _, folder in ipairs({ whiteFolder, blackFolder }) do
+		for _, piece in ipairs(folder:GetChildren()) do
+			if piece:IsA("BasePart") then
+				piece.Anchored = true
+				remember(piece)
+			end
+		end
+	end
+	for _, model in ipairs({ clock, chairBlack, lamp, props }) do
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") then remember(d) end
+		end
+	end
+end
+
+local function restore()
+	stopLampSwing()
+	stopBreathing()
+	for _, inst in ipairs(scratch) do
+		if inst.Parent then inst:Destroy() end
+	end
+	table.clear(scratch)
+	for part, cf in pairs(snapshot) do
+		if part.Parent then
+			part.Anchored = true
+			part.CFrame = cf
+		end
+	end
+	lamp.WorldPivot = lampPivot0
+	if raggy and raggyPivot0 then raggy:PivotTo(raggyPivot0) end
+	timeWhite, timeBlack, blackTarget, sideRunning = WHITE_TIME, BLACK_TIME, nil, nil
+	paintClock(true)
+end
+
+local typeScale = {}
+
+local function px(fraction)
+	return math.max(9, math.round(camera.ViewportSize.Y * fraction))
+end
+
+local function sized(label, fraction)
+	typeScale[label] = fraction
+	label.TextScaled = false
+	label.TextSize = px(fraction)
+	return label
+end
+
+camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+	for label, fraction in pairs(typeScale) do
+		if label.Parent then label.TextSize = px(fraction) end
+	end
+end)
+
+-- Roblox no tiene interletraje: las antetitulos en versales se separan a mano.
+local function tracked(text)
+	return table.concat(string.split(text, ""), " ")
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "FlagFallUI"
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.DisplayOrder = 200
+gui.Enabled = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local function makeLabel(parent, font, colour, fraction, alignment)
+	local t = Instance.new("TextLabel")
+	t.BackgroundTransparency = 1
+	t.Font = font
+	t.TextColor3 = colour
+	t.TextTransparency = 1
+	t.TextXAlignment = alignment or Enum.TextXAlignment.Center
+	t.TextYAlignment = Enum.TextYAlignment.Top
+	t.Text = ""
+	t.Parent = parent
+	return sized(t, fraction)
+end
+
+local function makeRule(parent, widthScale)
+	local f = Instance.new("Frame")
+	f.BackgroundColor3 = ACCENT
+	f.BackgroundTransparency = 1
+	f.BorderSizePixel = 0
+	f.AnchorPoint = Vector2.new(0.5, 0.5)
+	f.Size = UDim2.new(widthScale, 0, 0, 1)
+	f.Parent = parent
+	return f
+end
+
+local function makeBar(edge)
+	local f = Instance.new("Frame")
+	f.BackgroundColor3 = Color3.new(0, 0, 0)
+	f.BorderSizePixel = 0
+	f.AnchorPoint = Vector2.new(0, edge)
+	f.Position = UDim2.fromScale(0, edge)
+	f.Size = UDim2.fromScale(1, 0)
+	f.ZIndex = 6
+	f.Parent = gui
+	local hair = Instance.new("Frame")
+	hair.BackgroundColor3 = ACCENT
+	hair.BackgroundTransparency = 0.62
+	hair.BorderSizePixel = 0
+	hair.Size = UDim2.new(1, 0, 0, 1)
+	hair.AnchorPoint = Vector2.new(0, 1 - edge)
+	hair.Position = UDim2.fromScale(0, 1 - edge)
+	hair.ZIndex = 7
+	hair.Parent = f
+	return f
+end
+local barTop, barBottom = makeBar(0), makeBar(1)
+
+local titleBlock = Instance.new("Frame")
+titleBlock.BackgroundTransparency = 1
+titleBlock.AnchorPoint = Vector2.new(0.5, 0.5)
+titleBlock.Position = UDim2.fromScale(0.5, 0.335)
+titleBlock.Size = UDim2.fromScale(0.86, 0.30)
+titleBlock.Parent = gui
+
+local kickerLabel = makeLabel(titleBlock, Enum.Font.Oswald, ACCENT, 0.0185)
+kickerLabel.Size = UDim2.fromScale(1, 0.12)
+kickerLabel.Position = UDim2.fromScale(0, 0.19)
+
+local ruleTop = makeRule(titleBlock, 0.13)
+ruleTop.Position = UDim2.fromScale(0.5, 0.375)
+
+local titleLabel = makeLabel(titleBlock, Enum.Font.Oswald, INK, 0.090)
+titleLabel.Size = UDim2.fromScale(1, 0.34)
+titleLabel.Position = UDim2.fromScale(0, 0.41)
+titleLabel.TextYAlignment = Enum.TextYAlignment.Center
+
+local ruleBottom = makeRule(titleBlock, 0.13)
+ruleBottom.Position = UDim2.fromScale(0.5, 0.805)
+
+local ruleCard = Instance.new("Frame")
+ruleCard.BackgroundColor3 = CARD
+ruleCard.BackgroundTransparency = 1
+ruleCard.BorderSizePixel = 0
+ruleCard.AnchorPoint = Vector2.new(0, 1)
+ruleCard.Position = UDim2.fromScale(0.068, 0.848)
+ruleCard.Size = UDim2.fromScale(0.29, 0.13)
+ruleCard.Parent = gui
+
+local ruleEdge = Instance.new("Frame")
+ruleEdge.BackgroundColor3 = ACCENT
+ruleEdge.BackgroundTransparency = 1
+ruleEdge.BorderSizePixel = 0
+ruleEdge.Size = UDim2.new(0, 2, 1, 0)
+ruleEdge.Parent = ruleCard
+
+local rulePad = Instance.new("UIPadding")
+rulePad.PaddingLeft = UDim.new(0, 18)
+rulePad.PaddingTop = UDim.new(0, 13)
+rulePad.PaddingRight = UDim.new(0, 16)
+rulePad.Parent = ruleCard
+
+local ruleHeading = makeLabel(ruleCard, Enum.Font.Oswald, ACCENT, 0.0125, Enum.TextXAlignment.Left)
+ruleHeading.Size = UDim2.fromScale(1, 0.15)
+ruleHeading.Text = tracked("FIDE LAWS OF CHESS")
+
+local ruleArticle = makeLabel(ruleCard, Enum.Font.Oswald, INK, 0.027, Enum.TextXAlignment.Left)
+ruleArticle.Size = UDim2.fromScale(1, 0.26)
+ruleArticle.Position = UDim2.fromScale(0, 0.17)
+
+local ruleBody = makeLabel(ruleCard, Enum.Font.Merriweather, MUTED, 0.0155, Enum.TextXAlignment.Left)
+ruleBody.Size = UDim2.fromScale(1, 0.52)
+ruleBody.Position = UDim2.fromScale(0, 0.45)
+ruleBody.TextWrapped = true
+
+local captionLabel = makeLabel(gui, Enum.Font.Merriweather, Color3.fromRGB(224, 220, 212), 0.021)
+captionLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+captionLabel.Position = UDim2.fromScale(0.5, 0.862)
+captionLabel.Size = UDim2.fromScale(0.7, 0.05)
+captionLabel.TextYAlignment = Enum.TextYAlignment.Center
+
+local winCard = Instance.new("Frame")
+winCard.BackgroundColor3 = Color3.fromRGB(9, 8, 7)
+winCard.BackgroundTransparency = 1
+winCard.BorderSizePixel = 0
+winCard.Size = UDim2.fromScale(1, 1)
+winCard.ZIndex = 8
+winCard.Visible = false
+winCard.Parent = gui
+
+local winBorder = Instance.new("Frame")
+winBorder.BackgroundTransparency = 1
+winBorder.AnchorPoint = Vector2.new(0.5, 0.5)
+winBorder.Position = UDim2.fromScale(0.5, 0.5)
+winBorder.Size = UDim2.fromScale(0.90, 0.79)
+winBorder.ZIndex = 9
+winBorder.Parent = winCard
+local winStroke = Instance.new("UIStroke")
+winStroke.Color = ACCENT
+winStroke.Thickness = 1
+winStroke.Transparency = 1
+winStroke.Parent = winBorder
+
+local function cardLabel(font, colour, fraction, y, text)
+	local t = makeLabel(winCard, font, colour, fraction)
+	t.AnchorPoint = Vector2.new(0.5, 0.5)
+	t.Position = UDim2.fromScale(0.5, y)
+	t.Size = UDim2.fromScale(0.86, 0.14)
+	t.TextYAlignment = Enum.TextYAlignment.Center
+	t.ZIndex = 10
+	t.Text = text
+	return t
+end
+local winKicker = cardLabel(Enum.Font.Oswald, ACCENT, 0.0175, 0.352, tracked("GAME OVER"))
+local winTitle = cardLabel(Enum.Font.Oswald, INK, 0.135, 0.452, "WHITE WINS")
+local winRule = makeRule(winCard, 0.19)
+winRule.Position = UDim2.fromScale(0.5, 0.542)
+winRule.ZIndex = 10
+-- El marcador no lleva interletraje: separar un "1 - 0" lo vuelve ilegible.
+local winSub = cardLabel(Enum.Font.Oswald, INK, 0.026, 0.592, "1 - 0      WON ON TIME")
+local winFoot = cardLabel(Enum.Font.Merriweather, MUTED, 0.019, 0.662, "the checkmate is still on the board. the game is not.")
+local winChip = cardLabel(Enum.Font.Oswald, Color3.fromRGB(138, 120, 90), 0.0132, 0.735, tracked("FIDE LAWS OF CHESS / ARTICLE 6.9"))
+
+local RISE = 14
+local titleToken = 0
+
+local function propOf(obj)
+	return obj:IsA("TextLabel") and "TextTransparency" or "BackgroundTransparency"
+end
+
+local function show(obj, visible, delay, duration)
+	local home = obj:GetAttribute("Home") or obj.Position
+	obj:SetAttribute("Home", home)
+	obj.Position = home + UDim2.fromOffset(0, RISE)
+	obj[propOf(obj)] = 1
+	TweenService:Create(obj, TweenInfo.new(duration or 0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, delay or 0), {
+		[propOf(obj)] = visible, Position = home,
+	}):Play()
+end
+
+local function hide(obj, duration)
+	TweenService:Create(obj, TweenInfo.new(duration or 0.3), { [propOf(obj)] = 1 }):Play()
+end
+
+local function showTitle(text, kicker)
+	titleToken += 1
+	local token = titleToken
+	titleLabel.Text = text
+	kickerLabel.Text = kicker and tracked(kicker) or ""
+	show(titleLabel, 0, 0, 0.5)
+	if kicker then show(kickerLabel, 0, 0.08, 0.45) end
+	for i, line in ipairs({ ruleTop, ruleBottom }) do
+		line.Size = UDim2.new(0, 0, 0, 1)
+		line.BackgroundTransparency = 0.28
+		TweenService:Create(line, TweenInfo.new(0.75, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, 0.05 * i), {
+			Size = UDim2.new(0.13, 0, 0, 1),
+		}):Play()
+	end
+	task.delay(2.5, function()
+		if token ~= titleToken then return end
+		hide(titleLabel, 0.45)
+		hide(kickerLabel, 0.45)
+		hide(ruleTop, 0.45)
+		hide(ruleBottom, 0.45)
+	end)
+end
+
+local function showRule(article, body)
+	ruleArticle.Text = article
+	ruleBody.Text = body
+	show(ruleCard, 0.14, 0, 0.45)
+	show(ruleEdge, 0, 0.02, 0.45)
+	show(ruleHeading, 0, 0.06, 0.45)
+	show(ruleArticle, 0, 0.12, 0.45)
+	show(ruleBody, 0, 0.18, 0.5)
+end
+
+local function hideRule()
+	for _, obj in ipairs({ ruleCard, ruleEdge, ruleHeading, ruleArticle, ruleBody }) do hide(obj, 0.35) end
+end
+
+local function showCaption(text)
+	if text == nil or text == "" then
+		hide(captionLabel, 0.35)
+		return
+	end
+	captionLabel.Text = text
+	show(captionLabel, 0, 0.05, 0.45)
+end
+
+local function shot(name, override)
+	local s = SHOT[name]
+	if not s then return end
+	TweenService:Create(camGoal, TweenInfo.new(override or s[3], Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Value = CFrame.lookAt(s[1], s[2]),
+	}):Play()
+end
+
+local function shake(amount)
+	shakeAmount = math.max(shakeAmount, amount)
+end
+
+local function getHumanoid()
+	local char = player.Character
+	return char and char:FindFirstChildOfClass("Humanoid") or nil
+end
+
+local function setCharacterVisible(visible)
+	local char = player.Character
+	if not char then return end
+	for _, d in ipairs(char:GetDescendants()) do
+		if d:IsA("BasePart") or d:IsA("Decal") then
+			d.LocalTransparencyModifier = visible and 0 or 1
+		end
+	end
+end
+
+local function enterCinematic()
+	if active then return end
+	active = true
+
+	local hum = getHumanoid()
+	savedWorld = {
+		cameraType = camera.CameraType,
+		cameraSubject = camera.CameraSubject,
+		clockTime = Lighting.ClockTime,
+		walkSpeed = hum and hum.WalkSpeed or 16,
+		jumpPower = hum and hum.JumpPower or 50,
+		autoRotate = hum ~= nil and hum.AutoRotate or true,
+	}
+	if hum then
+		hum.WalkSpeed = 0
+		hum.JumpPower = 0
+		hum.AutoRotate = false
+	end
+	pcall(function() StarterGui:SetCore("TopbarEnabled", false) end)
+
+	colourEffect = Instance.new("ColorCorrectionEffect")
+	colourEffect.Parent = Lighting
+	TweenService:Create(colourEffect, TweenInfo.new(1.2), { Contrast = 0.16, Saturation = -0.1, Brightness = -0.03 }):Play()
+
+	camGoal.Value = camera.CFrame
+	camera.CameraType = Enum.CameraType.Scriptable
+	gui.Enabled = true
+	setCharacterVisible(false)
+
+	TweenService:Create(barTop, TweenInfo.new(0.7, Enum.EasingStyle.Quint), { Size = UDim2.fromScale(1, 0.098) }):Play()
+	TweenService:Create(barBottom, TweenInfo.new(0.7, Enum.EasingStyle.Quint), { Size = UDim2.fromScale(1, 0.098) }):Play()
+
+	RunService:BindToRenderStep(RENDER_KEY, Enum.RenderPriority.Camera.Value + 1, function(dt)
+		shakeAmount = math.max(0, shakeAmount - dt * 2.6)
+		local offset = Vector3.new(
+			(math.random() - 0.5) * shakeAmount,
+			(math.random() - 0.5) * shakeAmount,
+			(math.random() - 0.5) * shakeAmount * 0.4
+		)
+		camera.CFrame = camGoal.Value * CFrame.new(offset)
+		if timelapseSpeed > 0 then
+			Lighting.ClockTime = (Lighting.ClockTime + dt * timelapseSpeed) % 24
+		end
+		setCharacterVisible(false)
+	end)
+end
+
+local function exitCinematic()
+	if not active then return end
+	active = false
+	timelapseSpeed, shakeAmount = 0, 0
+	titleToken += 1
+	pcall(function() RunService:UnbindFromRenderStep(RENDER_KEY) end)
+
+	TweenService:Create(barTop, TweenInfo.new(0.5, Enum.EasingStyle.Quint), { Size = UDim2.fromScale(1, 0) }):Play()
+	TweenService:Create(barBottom, TweenInfo.new(0.5, Enum.EasingStyle.Quint), { Size = UDim2.fromScale(1, 0) }):Play()
+	for _, obj in ipairs({ titleLabel, kickerLabel, captionLabel, ruleTop, ruleBottom, winKicker, winTitle, winSub, winFoot, winChip, winRule }) do
+		hide(obj, 0.4)
+	end
+	hideRule()
+	TweenService:Create(winCard, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+	TweenService:Create(winStroke, TweenInfo.new(0.4), { Transparency = 1 }):Play()
+
+	if colourEffect then
+		local effect = colourEffect
+		colourEffect = nil
+		TweenService:Create(effect, TweenInfo.new(0.6), { Contrast = 0, Saturation = 0, Brightness = 0 }):Play()
+		task.delay(0.8, function() effect:Destroy() end)
+	end
+
+	if savedWorld then
+		Lighting.ClockTime = savedWorld.clockTime
+		local hum = getHumanoid()
+		if hum then
+			hum.WalkSpeed = savedWorld.walkSpeed
+			hum.JumpPower = savedWorld.jumpPower
+			hum.AutoRotate = savedWorld.autoRotate
+		end
+		camera.CameraType = savedWorld.cameraType
+		camera.CameraSubject = savedWorld.cameraSubject
+		savedWorld = nil
+	else
+		camera.CameraType = Enum.CameraType.Custom
+	end
+	pcall(function() StarterGui:SetCore("TopbarEnabled", true) end)
+
+	setCharacterVisible(true)
+	task.delay(0.6, function()
+		if not active then
+			gui.Enabled = false
+			winCard.Visible = false
+		end
+	end)
+end
+
+local function sequence()
+	local h1x, h1z = squareXZ("H1")
+	local tableY = TABLE_TOP + KING_HALF
+
+	enterCinematic()
+	shot("open")
+	task.wait(0.05)
+	shot("mate")
+
+	
+	sideRunning = "white"
+	startClock()
+	startBreathing()
+	checkLine()
+	glow(blackQueen, Color3.fromRGB(214, 66, 58), Color3.fromRGB(238, 122, 112), 0.78)
+	local kingGlow = glow(whiteKing, Color3.fromRGB(214, 66, 58), Color3.fromRGB(240, 172, 162), 0.82)
+	playSound(SOUND.Ping, board, 0.9)
+	showTitle("CHECKMATE", "WHITE TO MOVE")
+	showCaption("white has no legal move")
+	task.wait(2.3)
+
+	
+	local upright = whiteKing.CFrame
+	showTitle("...no.")
+	shake(0.10)
+	for i = 1, 3 do
+		local side = (i % 2 == 0) and 1 or -1
+		TweenService:Create(whiteKing, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+			CFrame = tilted(upright, KING_HALF, Vector3.zAxis, math.rad(17) * side),
+		}):Play()
+		task.wait(0.17)
+	end
+	TweenService:Create(whiteKing, TweenInfo.new(0.18), { CFrame = upright }):Play()
+	task.wait(0.55)
+
+	
+	shot("walk")
+	showCaption("the white king steps off h1")
+	kingGlow.FillColor, kingGlow.OutlineColor = ACCENT, ACCENT
+	walk(whiteKing, {
+		Vector3.new(65.0, tableY, -0.65),
+		Vector3.new(65.5, tableY, -2.05),
+	}, 0.60, 0.85)
+
+	
+	shot("reveal")
+	task.wait(1.0)
+	showTitle("BLACK.", "THE OPPONENT")
+	showCaption("asleep for forty minutes")
+	playSound(SOUND.Snore, raggy and raggy:FindFirstChildWhichIsA("BasePart", true) or board, 1, 0.32)
+	task.wait(1.6)
+	playSound(SOUND.Snore, board, 0.7, 0.28)
+	task.wait(0.6)
+
+
+	shot("climb")
+	showCaption("")
+	hop(whiteKing, Vector3.new(65.9, CLOCK_TOP + KING_HALF, -4.05), 0.70, 2.10)
+	playSound(SOUND.Step, clockBody, 0.8, 0.9)
+	task.wait(0.45)
+
+	
+	shot("press")
+	hop(whiteKing, Vector3.new(65.9, CLOCK_TOP + 0.34 + KING_HALF, -2.95), 0.42, 0.75)
+	pressSide("white")
+	playSound(SOUND.Press, clockBody, 1)
+	sideRunning = "black"
+	shake(0.16)
+	showRule("ARTICLE 7.5.5", "Pressing the clock without having made a move shall be considered and penalised as an illegal move.")
+	task.wait(1.7)
+
+	
+	shot("sleep")
+	showRule("ARTICLE 4.8", "An illegal move must be claimed by the opponent.")
+	playSound(SOUND.Snore, board, 0.9, 0.3)
+	task.wait(1.9)
+
+	-- 8 - el rey decide acelerar el reloj a pisotones
+	shot("stomp")
+	hideRule()
+	showCaption("nobody is claiming anything")
+	playSound(SOUND.Wind, clockBody, 0.5, 1.3)
+	startLampSwing()
+	timelapseSpeed = 26
+	local stomps = 5
+	for i = 1, stomps do
+		hop(whiteKing, Vector3.new(65.9, CLOCK_TOP + KING_HALF, -4.05 + ((i % 2 == 0) and 0.30 or -0.30)), 0.30, 1.15)
+		playSound(SOUND.Stomp, clockBody, 1, 0.85 + i * 0.06)
+		blackTarget = BLACK_TIME * (1 - i / stomps) ^ 1.5
+		lampVelocity += 1.9
+		shake(0.22 + i * 0.08)
+		timelapseSpeed = 26 + i * 34
+		puff(clockBody.Position + Vector3.new(0, 1.2, 0), 0.9, 3)
+		for _, piece in ipairs(blackFolder:GetChildren()) do
+			if piece:IsA("BasePart") and math.random() < 0.3 then puff(piece.Position, 0.5, 1) end
+		end
+
+	
+		if i == 2 then
+			local seat = chairBlack.Seat.Position
+			task.spawn(tipModel, chairBlack, Vector3.new(seat.X, 0, seat.Z - 1.3), Vector3.xAxis, math.rad(-96), 0.55)
+			task.delay(0.45, function() playSound(SOUND.Impact, chairBlack.Seat, 1, 0.8) end)
+		elseif i == 3 then
+			task.spawn(function()
+				local base = mug.Position
+				topple(mug, Vector3.new(-1, 0, 0.6), 0.4)
+				playSound(SOUND.Knock, mug, 0.8, 1.2)
+				puff(base, 0.6, 2)
+			end)
+		end
+		task.wait(0.16)
+	end
+	blackTarget = 0
+	task.wait(0.7)
+	stopLampSwing()
+	timelapseSpeed = 0
+
+	shot("flag")
+	showTitle("FLAG FALL")
+	showRule("ARTICLE 6.9", "A player who runs out of time loses the game.")
+	shake(0.75)
+	playSound(SOUND.Snap, clockBody, 1)
+	playSound(SOUND.Boom, board, 1, 0.65)
+	if colourEffect then
+		TweenService:Create(colourEffect, TweenInfo.new(0.1), { Brightness = 0.32, Contrast = 0.45 }):Play()
+		task.delay(0.18, function()
+			if colourEffect then
+				TweenService:Create(colourEffect, TweenInfo.new(0.7), { Brightness = -0.03, Contrast = 0.16 }):Play()
+			end
+		end)
+	end
+	task.spawn(fling, clockFlag, Vector3.new(66.9, TABLE_TOP + 0.14, -6.0), 0.55, Vector3.zAxis)
+	task.wait(1.5)
+
+
+	shot("collapse")
+	hideRule()
+	shake(0.5)
+	shockwave(Vector3.new(60, BOARD_TOP + 0.08, -4), 30, 0.85)
+	playSound(SOUND.Knock, board, 1, 0.8)
+	task.spawn(topple, blackKing, Vector3.new(0, 0, 1), 0.55)
+	puff(blackKing.Position, 1.2, 5)
+	glow(blackKing, Color3.fromRGB(30, 30, 30), Color3.fromRGB(214, 66, 58), 0.85)
+
+	local order = {}
+	for _, piece in ipairs(blackFolder:GetChildren()) do
+		if piece:IsA("BasePart") and piece ~= blackKing and piece ~= blackQueen then
+			table.insert(order, piece)
+		end
+	end
+	table.sort(order, function(a, b)
+		return (a.Position - blackKing.Position).Magnitude < (b.Position - blackKing.Position).Magnitude
+	end)
+	for i, piece in ipairs(order) do
+		task.delay(0.055 * i, function()
+			if state ~= RUNNING then return end
+			local away = (piece.Position - blackKing.Position) * Vector3.new(1, 0, 1)
+			topple(piece, away.Magnitude > 0.1 and away or Vector3.xAxis, 0.42)
+			playSound(SOUND.Knock, piece, 0.3, 1.2 + math.random() * 0.3)
+		end)
+	end
+
+	task.delay(0.2, function()
+		if state ~= RUNNING then return end
+		fling(blackQueen, Vector3.new(69.8, FLOOR_TOP + 0.34, -9.0), 0.9, Vector3.zAxis)
+		playSound(SOUND.Impact, board, 0.6, 1.1)
+	end)
+	task.wait(2.2)
+
+
+	shot("crown")
+	showCaption("the king walks back to h1")
+	sideRunning = nil
+	walk(whiteKing, {
+		Vector3.new(65.4, tableY, -2.30),
+		Vector3.new(h1x, BOARD_TOP + KING_HALF, h1z),
+	}, 0.55, 1.30)
+
+	-- 12 - victoria
+	shot("final")
+	showCaption("")
+	glow(whiteKing, ACCENT, ACCENT, 0.72)
+	shockwave(whiteKing.Position, 22, 1.1)
+	confetti(90)
+	playSound(SOUND.Victory, board, 1)
+	winCard.Visible = true
+	TweenService:Create(winCard, TweenInfo.new(0.6), { BackgroundTransparency = 0.32 }):Play()
+	TweenService:Create(winStroke, TweenInfo.new(0.9), { Transparency = 0.45 }):Play()
+	show(winKicker, 0, 0.15, 0.5)
+	show(winTitle, 0, 0.28, 0.6)
+	winRule.Size = UDim2.new(0, 0, 0, 1)
+	winRule.BackgroundTransparency = 0.22
+	TweenService:Create(winRule, TweenInfo.new(0.9, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, 0, false, 0.45), {
+		Size = UDim2.new(0.19, 0, 0, 1),
+	}):Play()
+	show(winSub, 0, 0.6, 0.5)
+	show(winFoot, 0, 0.85, 0.6)
+	show(winChip, 0, 1.15, 0.6)
+	task.wait(7.5)
+end
+
+local prompt = Instance.new("ProximityPrompt")
+prompt.Name = "ResignPrompt"
+prompt.ActionText = "RESIGN"
+prompt.ObjectText = "WHITE KING"
+prompt.HoldDuration = 0
+prompt.MaxActivationDistance = 22
+prompt.RequiresLineOfSight = false
+prompt.UIOffset = Vector2.new(0, -14)
+prompt.Parent = whiteKing
+
+local idleAnchor = Instance.new("Part")
+idleAnchor.Name = "IdleLabelAnchor"
+idleAnchor.Size = Vector3.one * 0.2
+idleAnchor.Position = Vector3.new(60, BOARD_TOP + 3.2, -4)
+idleAnchor.Anchored, idleAnchor.CanCollide, idleAnchor.CanQuery = true, false, false
+idleAnchor.Transparency = 1
+idleAnchor.Parent = scene
+
+local idleLabel = Instance.new("BillboardGui")
+idleLabel.Name = "IdleLabel"
+idleLabel.Size = UDim2.fromScale(10, 2.8)
+idleLabel.AlwaysOnTop = true
+idleLabel.Parent = idleAnchor
+do
+	local heading = Instance.new("TextLabel")
+	heading.Size = UDim2.fromScale(1, 0.40)
+	heading.BackgroundTransparency = 1
+	heading.Font = Enum.Font.Oswald
+	heading.TextScaled = true
+	heading.Text = "CHECKMATE"
+	heading.TextColor3 = INK
+	heading.TextStrokeTransparency = 0.3
+	heading.Parent = idleLabel
+
+	local line = Instance.new("Frame")
+	line.AnchorPoint = Vector2.new(0.5, 0.5)
+	line.Position = UDim2.fromScale(0.5, 0.47)
+	line.Size = UDim2.new(0.2, 0, 0, 1)
+	line.BackgroundColor3 = ACCENT
+	line.BackgroundTransparency = 0.3
+	line.BorderSizePixel = 0
+	line.Parent = idleLabel
+
+	local sub = Instance.new("TextLabel")
+	sub.Size = UDim2.fromScale(1, 0.2)
+	sub.Position = UDim2.fromScale(0, 0.54)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.Oswald
+	sub.TextScaled = true
+	sub.Text = tracked("WHITE TO MOVE")
+	sub.TextColor3 = ACCENT
+	sub.TextStrokeTransparency = 0.45
+	sub.Parent = idleLabel
+
+	local hint = Instance.new("TextLabel")
+	hint.Size = UDim2.fromScale(1, 0.2)
+	hint.Position = UDim2.fromScale(0, 0.78)
+	hint.BackgroundTransparency = 1
+	hint.Font = Enum.Font.Merriweather
+	hint.TextScaled = true
+	hint.Text = "interact with the white king"
+	hint.TextColor3 = MUTED
+	hint.TextStrokeTransparency = 0.5
+	hint.Parent = idleLabel
+end
+
+local function setArmed(armed)
+	prompt.Enabled = armed
+	idleLabel.Enabled = armed
+end
+
+local function run()
+	if state ~= IDLE then return end
+	state = RUNNING
+	setArmed(false)
+
+	local ok, err = pcall(sequence)
+	if not ok then
+		warn("[FlagFall] la secuencia fallo: " .. tostring(err))
+	end
+
+	exitCinematic()
+	task.wait(1.2)
+	stopClock()
+	restore()
+	state = IDLE
+	setArmed(true)
+end
+
+prompt.Triggered:Connect(run)
+
+-- Red de seguridad: si el jurado prefiere hacer clic en la pieza en vez de
+-- usar la tecla, tambien vale.
+local mouse = player:GetMouse()
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or state ~= IDLE then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	if mouse.Target == whiteKing then run() end
+end)
+
+clockFlag.CanCollide = false
+takeSnapshot()
+paintClock(true)
+setArmed(true)
+print(("[FlagFall] ready | %d parts registered | raggy: %s"):format(
+	(function() local n = 0; for _ in pairs(snapshot) do n += 1 end; return n end)(),
+	tostring(raggy ~= nil)
+))
