@@ -1,0 +1,387 @@
+# ZPSTUDIOS
+
+### Roblox Development • Luau • Game Systems • Technical Architecture
+
+Welcome to the official technical portfolio of **ZPSTUDIOS**.
+
+This repository documents selected projects, systems, technical experiments, architecture decisions, and development work created by me for Roblox experiences and related projects.
+
+The purpose of this repository is to demonstrate my **engineering capabilities, system design, problem-solving approach, and development experience** without exposing proprietary production source code.
+
+---
+
+# About Me
+
+I am a Roblox developer focused on building **gameplay systems, frameworks, backend architecture, security systems, UI systems, audio systems, and scalable game infrastructure using Luau**.
+
+My work covers both the technical and structural side of game development.
+
+I have worked on systems ranging from small gameplay mechanics to larger modular architectures designed to support entire Roblox experiences.
+
+My development philosophy is centered around:
+
+* Modular architecture
+* Server-authoritative gameplay
+* Security-conscious design
+* Reusable systems
+* Performance
+* Maintainability
+* Clear separation of responsibilities
+* Scalable codebases
+* Reliable multiplayer behavior
+
+---
+
+# Featured Projects
+
+# 🔪 Murder After Dark
+
+**Genre:** Multiplayer Horror / Murder Mystery
+**Platform:** Roblox
+**Status:** In Development
+
+**Murder After Dark (MAD)** is a multiplayer horror experience currently being developed by ZPSTUDIOS.
+
+The project combines round-based multiplayer gameplay, horror presentation, social interaction, combat mechanics, progression and cinematic elements.
+
+The experience is built around a custom technical foundation developed specifically for the project.
+
+## Development Areas
+
+My work on the project includes development across several areas of the experience, including:
+
+* Multiplayer gameplay systems
+* Round-based gameplay
+* Player roles
+* Combat and interaction systems
+* Map integration
+* Spectating
+* Progression
+* Inventory and cosmetics
+* User interface
+* Game flow
+* Server-side gameplay logic
+* Security and validation
+* Performance considerations
+* Cinematic gameplay presentation
+
+## Technical Approach
+
+MAD uses a modular and security-conscious development approach designed to keep important gameplay logic on the server while maintaining a responsive experience for players.
+
+The project has required solving problems involving multiplayer state management, gameplay synchronization, player interaction, security and long-term maintainability.
+
+## Confidentiality
+
+Because **Murder After Dark is an active proprietary project**, detailed technical information is intentionally withheld from this repository.
+
+The following information is **not publicly disclosed**:
+
+* Production source code
+* Internal module names
+* Complete system architecture
+* Internal folder structures
+* Networking implementation details
+* Security implementation details
+* Anti-exploit logic
+* Data structures
+* Production configurations
+* Internal game logic
+* Unreleased features
+* Proprietary development tools
+
+Public portfolio samples related to MAD, when provided, are limited to **isolated demonstrations or recreated examples** that do not expose the production implementation.
+
+The purpose of showcasing MAD here is to demonstrate experience with developing a complex Roblox multiplayer project while respecting the security and intellectual property of the project.
+
+> **MAD is intentionally presented at a high level. The absence of production source code is deliberate.**
+
+
+# 🌅 Sunset Party Club
+
+**Genre:** Social / Party / Roleplay
+**Platform:** Roblox
+
+Sunset Party Club is a social multiplayer experience focused on music, nightlife, events, cosmetics and player interaction.
+
+The project required the development of several interconnected systems designed to support a continuously running social experience.
+
+### Systems
+
+Among the systems developed or designed for the project:
+
+* DJ system
+* Music analysis
+* Beat detection
+* Drop detection
+* Reactive lighting
+* Laser effects
+* Particle effects
+* Player inventory
+* Cosmetics
+* Daily rewards
+* Achievements
+* Missions
+* VIP systems
+* Global currencies
+* Shop systems
+* Social interactions
+* Event systems
+* UI systems
+* Mobile support
+
+---
+
+# 🎵 AudioAnalyzer / BeatService
+
+One of the more specialized systems developed for Sunset Party Club is the game's audio-reactive infrastructure.
+
+The system analyzes music and exposes gameplay events based on the audio.
+
+### Features
+
+* Audio normalization
+* Beat detection
+* Drop detection
+* Audio intensity analysis
+* Reactive visual effects
+* Event-based audio communication
+
+Example conceptual flow:
+
+```text
+Sound
+  ↓
+Audio Analyzer
+  ↓
+Beat Detection
+  ↓
+BeatService
+  ├── OnBeat
+  └── OnDrop
+        ↓
+Visual Systems
+ ├── Lights
+ ├── Lasers
+ ├── Particles
+ └── Environment Effects
+```
+
+The goal is to allow different systems to react to music without every effect having to independently analyze the audio.
+
+---
+
+# 🧩 ZPFramework
+
+**ZPFramework** is a modular framework architecture developed for Roblox projects.
+
+The framework is intended to provide reusable infrastructure that can be shared across different ZPSTUDIOS experiences.
+
+Rather than rebuilding the same foundational systems for every game, the framework separates reusable infrastructure from game-specific gameplay.
+
+### Architectural Goals
+
+* Modular services
+* Clear responsibilities
+* Reusable components
+* Server/client separation
+* Centralized configuration
+* Event-driven communication
+* Easier debugging
+* Scalability
+
+Conceptually:
+
+```text
+ZPFramework
+│
+├── Core
+├── Services
+├── Configuration
+├── Networking
+├── Security
+├── Utilities
+└── Game-Specific Systems
+```
+
+The production implementation remains private.
+
+---
+
+# 🛡️ Security Research & ZP Sentinel
+
+I have also worked on Roblox security and anti-exploit concepts.
+
+This work focuses on understanding how unauthorized scripts and exploit environments interact with Roblox experiences and how defensive systems can detect suspicious behavior.
+
+### Areas explored
+
+* Client/server trust boundaries
+* Remote validation
+* Suspicious remote activity
+* Runtime checks
+* Script injection concepts
+* Exploit detection
+* Security telemetry
+* Server-side validation
+* Protection of important game systems
+
+The objective is not simply to detect an exploit executable, but to make important game logic **server-authoritative and difficult to abuse**.
+
+Production security implementations are intentionally excluded from this repository.
+
+---
+
+# 🖥️ UI & UX Systems
+
+I have designed and implemented UI structures for Roblox experiences including:
+
+* Main menus
+* HUDs
+* Inventory systems
+* Shops
+* Settings
+* Statistics
+* Spectator interfaces
+* Voting interfaces
+* Game mode selection
+* VIP interfaces
+* Rewards
+* Cases
+* Cosmetic selection
+
+Particular attention is given to maintaining usability across:
+
+* PC
+* Mobile
+* Tablet
+
+Mobile testing has been performed on real devices to identify issues that are not always visible when testing only in Studio.
+
+---
+
+# 🎮 Gameplay Systems
+
+Across my projects I have created and experimented with multiple gameplay systems.
+
+Examples include:
+
+### Round Systems
+
+* Intermission
+* Map selection
+* Map voting
+* Role selection
+* Round start
+* Active gameplay
+* Round ending
+* Rewards
+* Spectating
+* Cleanup
+
+### Combat
+
+* Weapon systems
+* Hit validation
+* Server-authoritative logic
+* Ammunition management
+* Stun mechanics
+* Combat states
+
+### Progression
+
+* Player statistics
+* Achievements
+* Missions
+* Daily rewards
+* Currency
+* Cosmetics
+* Unlockable content
+
+---
+
+# 🔧 Development Approach
+
+I try to avoid creating extremely large scripts responsible for an entire game.
+
+Instead, systems are separated according to responsibility.
+
+For example:
+
+```text
+RoundManager
+      ↓
+RoleManager
+      ↓
+CombatManager
+      ↓
+RewardManager
+      ↓
+Player Data
+```
+
+Each system has a specific purpose and communicates with other systems through controlled interfaces.
+
+This makes it easier to debug problems and modify individual systems without unnecessarily affecting unrelated parts of the game.
+
+---
+
+# 📱 Performance & Platform Testing
+
+Performance is an important part of my development process.
+
+I do not consider a feature complete simply because it works on a development PC.
+
+Systems are tested for:
+
+* Multiplayer behavior
+* Mobile interaction
+* UI scaling
+* Performance
+* Network behavior
+* Edge cases
+* Unexpected player behavior
+
+I have specifically tested Roblox interfaces on mobile and tablet hardware to identify usability problems such as inaccessible menus, clipped text, scrolling problems and interaction conflicts.
+
+---
+
+# 🔐 Why Production Source Code Is Private
+
+This repository intentionally does **not** contain the source code of my production projects.
+
+The reason is simple:
+
+### Security + Intellectual Property
+
+Production code contains proprietary architecture, gameplay logic, security systems, data structures and implementation details.
+
+Publishing everything publicly would make it significantly easier to:
+
+* Copy proprietary systems
+* Reconstruct game architecture
+* Abuse security implementations
+* Reuse commercial code without permission
+* Compromise production systems
+
+---
+
+# 🎯 Portfolio Objective
+
+This repository is not intended to be a dump of everything I have ever created.
+
+It is a curated representation of how I approach Roblox development.
+
+I want recruiters, developers and potential collaborators to be able to understand:
+
+**What I build.**
+
+**How I build it.**
+
+**Why I build it that way.**
+
+**And how I approach technical problems.**
+
+Production source code remains private, but the engineering concepts behind that work can still be demonstrated through the public examples in this repository.
+
+---
