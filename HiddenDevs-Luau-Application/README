@@ -1,0 +1,77 @@
+Arcline Combat
+A server-authoritative combat and ability system for Roblox, written in strict Luau as a single self-contained server script.
+
+The whole file is built around one rule: a client may ask for an ability and hand over an aim direction — nothing else. It never supplies an origin, a target, a hit list, a damage number or a cooldown, because those are exactly the values a modified client forges first. Hit detection, damage, cooldowns, rate limiting and knockback are all resolved on the server from data the server can see.
+
+Scope: this is a public demonstration project written to show architecture and Roblox API work in a readable amount of code. It shares design principles with the private framework I maintain for a published game, but contains none of its source, IDs or configuration.
+
+What it demonstrates
+Area	Where to look
+Service lifecycle (Init / Start two-pass boot)	Framework
+Custom signal with re-entrancy-safe dispatch	Signal
+Ownership-scoped cleanup	Bin, PlayerState.bin / characterBin
+Remote validation & untrusted input parsing	CombatService:Execute, sanitizeDirection
+Rate limiting (token bucket) + per-ability cooldowns	PlayerStateService:ConsumeToken
+State machine with a declarative transition table	STATE_RULES, SetState
+Spatial queries: cone melee, raycast with falloff	_resolveArc, _resolveRay
+CFrame math (PointToObjectSpace cone test)	_resolveArc
+Physics: clamped impulses, grounded dash	_applyHit, _resolveMobility
+Player & character lifecycle, leak-free teardown	PlayerStateService
+Load-time config validation	REQUIRED_FIELDS block
+Abilities
+Abilities are data, not code paths. Each entry names a Kind, and each Kind has exactly one resolver — adding an ability is a table entry, not a new branch.
+
+Ability	Kind	Behaviour
+Cleave	Arc	65° cone melee. Broadphase radius query, then a cone test in the attacker's object space, deduplicated per character model.
+Bolt	Ray	95-stud hitscan with linear damage falloff measured from the real impact point.
+Lunge	Mobility	Grounded-only dash applying a single clamped impulse.
+Architecture
+CONFIG (frozen)          tuning values, validated at load
+├── Signal               deferred-compaction event dispatch
+├── Bin                  add-on-create cleanup scope
+└── Framework            service registry, Init() then Start()
+    ├── PlayerStateService   per-player record, state machine, token bucket, lifecycle
+    ├── CombatService        remotes, tools, validation ladder, ability resolvers
+    └── TelemetryService     damage scoring and rejection logging
+Both input front-ends — the RemoteEvent a real client would use and the Tools the demo hands out — funnel into the same CombatService:Execute, because validation belongs to the service, not to whichever transport delivered the request.
+
+Validation runs cheapest-first and bails on the first failure, so the work a spamming client can force is a table lookup, never a physics query:
+
+type check → ability exists → player state → loadout → token bucket
+→ aim sanitization → liveness → action state → cooldown → grounded check
+→ commit (cooldown + state lock) → resolve
+Installation
+Open Roblox Studio and create a place (a Baseplate is enough).
+Create a Script in ServerScriptService and paste in ArclineCombat.lua.
+Add a few targets: Model tab → Rig Builder → insert 2–4 R15 dummies near the spawn.
+Nothing else is required. The script provisions ReplicatedStorage/ArclineNet (AbilityRequest, CombatFeedback, QueryLoadout) and the three ability Tools at runtime.
+
+Testing
+Normal play — press Play. Equip a tool with 1, 2 or 3 and click.
+
+Cleave damages every dummy inside the cone in front of you, once each, and knocks them back.
+Bolt hits whatever the ray reaches; damage drops with distance.
+Lunge dashes you forward, but only while grounded.
+Your running damage total appears in the player list (leaderstats).
+Server authority — open the client console (F9 → Client, or the Studio command bar in client context) and send raw requests the way an exploiter would:
+
+local net = game:GetService("ReplicatedStorage").ArclineNet
+
+net.AbilityRequest:FireServer("Cleave", Vector3.new(0, -9, 1))   -- pitch clamped, still resolves
+net.AbilityRequest:FireServer("Cleave", Vector3.new(0, -1, 0))   -- BadAim (no horizontal facing)
+net.AbilityRequest:FireServer("Bolt", Vector3.new(0/0, 0/0, 0))  -- BadAim (NaN)
+net.AbilityRequest:FireServer("Nuke", Vector3.zAxis)             -- UnknownAbility
+net.AbilityRequest:FireServer(123, nil)                          -- BadRequest
+
+for _ = 1, 40 do                                                 -- Throttled
+    net.AbilityRequest:FireServer("Bolt", Vector3.zAxis)
+end
+
+print(net.QueryLoadout:InvokeServer())                           -- server-side cooldowns
+Every rejection is logged on the server with its reason and a running count per player. The client is told the outcome of its own request through CombatFeedback and nothing more.
+
+Notes
+Strict Luau (--!strict) with explicit types on the player record, ability data and service boundaries.
+os.clock() is used for all timing — a monotonic process clock, so a wall-clock correction cannot make a cooldown expire early or hang.
+All impulses are clamped; uncapped knockback is a free "launch a player out of the map" exploit as soon as two sources stack in one frame.
+Every per-player connection and instance is registered in a Bin at creation, so PlayerRemoving drops the whole graph in one call.
